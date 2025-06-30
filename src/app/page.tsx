@@ -1,103 +1,163 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useTransition } from "react";
+import { Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SearchResults } from "@/components/search-results";
+import { QueryUsageIndicator } from "@/components/query-usage-indicator";
+import { SearchResult } from "@/types/search";
+import { searchPersonAction } from "@/lib/actions/search-actions";
+import { exportToExcel } from "@/lib/excel-export";
+import { useQueryLimit } from "@/hooks/use-query-limit";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [name, setName] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const { canQuery, incrementUsage } = useQueryLimit();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+
+    // クエリ制限チェック
+    if (!canQuery) {
+      setError('本日のクエリ制限（100回）に達しました。明日リセットされます。');
+      return;
+    }
+
+    setError(null);
+    
+    startTransition(async () => {
+      try {
+        // クエリ使用量を増加
+        const canProceed = incrementUsage();
+        if (!canProceed) {
+          setError('クエリ制限に達しました。');
+          return;
+        }
+
+        const result = await searchPersonAction(name.trim());
+        
+        if (result.success && result.data) {
+          setSearchResults(result.data.results);
+        } else {
+          setError(result.error || '検索中にエラーが発生しました');
+          setSearchResults([]);
+        }
+      } catch (err) {
+        setError('検索中に予期しないエラーが発生しました');
+        setSearchResults([]);
+        console.error('Search error:', err);
+      }
+    });
+  };
+
+  const handleExport = (selectedResults: SearchResult[]) => {
+    try {
+      const result = exportToExcel(selectedResults);
+      console.log(`Exported ${result.recordCount} records to ${result.filename}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'エクスポート中にエラーが発生しました');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-foreground mb-2">
+              顧客名簿検索アプリ
+            </h1>
+            <p className="text-muted-foreground text-lg">
+              氏名から会社名・勤務先住所を検索してExcel出力
+            </p>
+          </div>
+
+          {/* Query Usage Indicator */}
+          <QueryUsageIndicator />
+
+          {/* Search Form */}
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                氏名検索
+              </CardTitle>
+              <CardDescription>
+                検索したい方の氏名を入力してください
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSearch} className="space-y-4">
+                <div className="flex gap-4">
+                  <Input
+                    type="text"
+                    placeholder="例: 田中太郎"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="flex-1"
+                    required
+                  />
+                  <Button type="submit" disabled={isPending || !name.trim() || !canQuery}>
+                    {isPending ? "検索中..." : canQuery ? "検索" : "制限達成"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Error Message */}
+          {error && (
+            <Card className="mb-8 border-destructive">
+              <CardContent className="py-4">
+                <p className="text-destructive text-sm">{error}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Loading State */}
+          {isPending && (
+            <Card className="mb-8">
+              <CardContent className="py-8">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                  <p className="text-muted-foreground">検索中...</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Search Results */}
+          {searchResults.length > 0 && !isPending && (
+            <div className="mb-8">
+              <SearchResults results={searchResults} onExport={handleExport} />
+            </div>
+          )}
+
+          {/* Instructions */}
+          {searchResults.length === 0 && !isPending && (
+            <Card>
+              <CardHeader>
+                <CardTitle>使い方</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                  <li>上記のフォームに検索したい方の氏名を入力してください</li>
+                  <li>検索ボタンをクリックして検索を実行します</li>
+                  <li>検索結果が表示されたら、必要な情報にチェックを入れてください</li>
+                  <li>エクスポートボタンをクリックしてExcel形式でダウンロードします</li>
+                </ol>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
     </div>
   );
 }
