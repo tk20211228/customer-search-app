@@ -66,98 +66,84 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-foreground mb-2">
-              顧客名簿検索アプリ
-            </h1>
-            <p className="text-muted-foreground text-lg">
-              氏名から会社名・勤務先住所を検索してExcel出力
-            </p>
-          </div>
+    <>
+      {/* Query Usage Indicator */}
+      <QueryUsageIndicator />
 
-          {/* Query Usage Indicator */}
-          <QueryUsageIndicator />
-
-          {/* Search Form */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                氏名検索
-              </CardTitle>
-              <CardDescription>
-                検索したい方の氏名を入力してください
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSearch} className="space-y-4">
-                <div className="flex gap-4">
-                  <Input
-                    type="text"
-                    placeholder="例: 田中太郎"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="flex-1"
-                    required
-                  />
-                  <Button type="submit" disabled={isPending || !name.trim() || !canQuery}>
-                    {isPending ? "検索中..." : canQuery ? "検索" : "制限達成"}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-
-          {/* Error Message */}
-          {error && (
-            <Card className="mb-8 border-destructive">
-              <CardContent className="py-4">
-                <p className="text-destructive text-sm">{error}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Loading State */}
-          {isPending && (
-            <Card className="mb-8">
-              <CardContent className="py-8">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                  <p className="text-muted-foreground">検索中...</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Search Results */}
-          {searchResults.length > 0 && !isPending && (
-            <div className="mb-8">
-              <SearchResults results={searchResults} onExport={handleExport} />
+      {/* Search Form */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Search className="h-5 w-5" />
+            氏名検索（基本検索）
+          </CardTitle>
+          <CardDescription>
+            検索したい方の氏名を入力してください（Google検索ベース）
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSearch} className="space-y-4">
+            <div className="flex gap-4">
+              <Input
+                type="text"
+                placeholder="例: 田中太郎"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="flex-1"
+                required
+              />
+              <Button type="submit" disabled={isPending || !name.trim() || !canQuery}>
+                {isPending ? "検索中..." : canQuery ? "検索" : "制限達成"}
+              </Button>
             </div>
-          )}
+          </form>
+        </CardContent>
+      </Card>
 
-          {/* Instructions */}
-          {searchResults.length === 0 && !isPending && (
-            <Card>
-              <CardHeader>
-                <CardTitle>使い方</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                  <li>上記のフォームに検索したい方の氏名を入力してください</li>
-                  <li>検索ボタンをクリックして検索を実行します</li>
-                  <li>検索結果が表示されたら、必要な情報にチェックを入れてください</li>
-                  <li>エクスポートボタンをクリックしてExcel形式でダウンロードします</li>
-                </ol>
-              </CardContent>
-            </Card>
-          )}
+      {/* Error Message */}
+      {error && (
+        <Card className="mb-8 border-destructive">
+          <CardContent className="py-4">
+            <p className="text-destructive text-sm">{error}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Loading State */}
+      {isPending && (
+        <Card className="mb-8">
+          <CardContent className="py-8">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">検索中...</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Search Results */}
+      {searchResults.length > 0 && !isPending && (
+        <div className="mb-8">
+          <SearchResults results={searchResults} onExport={handleExport} />
         </div>
-      </div>
-    </div>
+      )}
+
+      {/* Instructions */}
+      {searchResults.length === 0 && !isPending && (
+        <Card>
+          <CardHeader>
+            <CardTitle>使い方</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+              <li>上記のフォームに検索したい方の氏名を入力してください</li>
+              <li>検索ボタンをクリックして検索を実行します</li>
+              <li>検索結果が表示されたら、必要な情報にチェックを入れてください</li>
+              <li>エクスポートボタンをクリックしてExcel形式でダウンロードします</li>
+            </ol>
+          </CardContent>
+        </Card>
+      )}
+    </>
   );
 }
