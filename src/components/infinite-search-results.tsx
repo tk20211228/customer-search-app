@@ -1,94 +1,95 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Download, Building2, MapPin, Phone, Mail, Globe, Loader2 } from "lucide-react";
+import { useState, useCallback } from "react";
+import {
+  Download,
+  Building2,
+  MapPin,
+  Phone,
+  Mail,
+  Globe,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SearchResult } from "@/types/search";
+import { InView } from "react-intersection-observer";
+import useSWRInfinite from "swr/infinite";
+import { searchPersonActionPaginated } from "@/lib/actions/search-actions";
+import { QueryUsageContent } from "@/components/query-usage-content";
+import { useQueryLimit } from "@/hooks/use-query-limit";
 
-interface SearchResultsProps {
-  results: SearchResult[];
+interface InfiniteSearchResultsProps {
+  searchParams: {
+    name: string;
+    address?: string;
+    excludeKeywords?: string[];
+  };
   onExport: (selectedResults: SearchResult[]) => void;
-  totalResults?: number;
-  onLoadMore?: () => void;
-  hasMore?: boolean;
-  isLoadingMore?: boolean;
 }
 
-export function SearchResults({ 
-  results, 
-  onExport, 
-  totalResults, 
-  onLoadMore, 
-  hasMore, 
-  isLoadingMore 
-}: SearchResultsProps) {
+export function InfiniteSearchResults({
+  searchParams,
+  onExport,
+}: InfiniteSearchResultsProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const { incrementUsage } = useQueryLimit();
 
-  // Intersection Observer for infinite scroll
-  useEffect(() => {
-    console.log('useEffect called with:', { 
-      hasOnLoadMore: !!onLoadMore, 
-      hasMore, 
-      isLoadingMore, 
-      hasRef: !!loadMoreRef.current 
-    });
-
-    if (!onLoadMore) {
-      console.log('No onLoadMore function provided');
-      return;
-    }
-
-    if (!hasMore) {
-      console.log('No more results to load');
-      return;
-    }
-
-    if (isLoadingMore) {
-      console.log('Already loading more results');
-      return;
-    }
-
-    if (!loadMoreRef.current) {
-      console.log('No ref element found');
-      return;
-    }
-
-    console.log('Setting up Intersection Observer...');
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        console.log('Intersection Observer callback triggered', entries);
-        entries.forEach((entry) => {
-          console.log('Entry intersection:', entry.isIntersecting, { hasMore, isLoadingMore });
-          if (entry.isIntersecting && hasMore && !isLoadingMore) {
-            console.log('Calling onLoadMore...');
-            onLoadMore();
-          }
-        });
-      },
-      { 
-        threshold: 0.1,
-        rootMargin: '50px'
+  const getKey = useCallback(
+    (pageIndex: number, previousPageData: { hasMore: boolean } | null) => {
+      if (previousPageData && !previousPageData.hasMore) {
+        return null; // 最後のページに到達
       }
-    );
+      return {
+        ...searchParams,
+        page: pageIndex,
+      };
+    },
+    [searchParams]
+  );
 
-    const currentRef = loadMoreRef.current;
-    console.log('Observing element:', currentRef);
-    observer.observe(currentRef);
+  const fetcher = useCallback(
+    async (params: {
+      name: string;
+      address?: string;
+      excludeKeywords?: string[];
+      page: number;
+    }) => {
+      // 1秒の遅延を追加（参考コードと同様）
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    return () => {
-      console.log('Cleaning up observer');
-      observer.unobserve(currentRef);
-      observer.disconnect();
-    };
-  }, [onLoadMore, hasMore, isLoadingMore]);
+      return await searchPersonActionPaginated(
+        params.name,
+        params.address,
+        params.excludeKeywords,
+        params.page,
+        10 // limit
+      );
+    },
+    []
+  );
+
+  const { data, isValidating, size, setSize } = useSWRInfinite(
+    getKey,
+    fetcher,
+    {
+      revalidateOnReconnect: false,
+      revalidateIfStale: false,
+      revalidateOnFocus: false,
+      revalidateFirstPage: false,
+    }
+  );
+
+  const results = data?.map((page) => page.results).flat() || [];
+  const isLast =
+    data && data[data.length - 1] && !data[data.length - 1].hasMore;
+  const totalCount = data?.[0]?.totalCount || 0;
+  const actualTotalCount = totalCount; // Google APIからの正確な総件数
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(results.map(r => r.id)));
+      setSelectedIds(new Set(results.map((r) => r.id)));
     } else {
       setSelectedIds(new Set());
     }
@@ -105,21 +106,45 @@ export function SearchResults({
   };
 
   const handleExport = () => {
-    const selectedResults = results.filter(r => selectedIds.has(r.id));
+    const selectedResults = results.filter((r) => selectedIds.has(r.id));
     onExport(selectedResults);
   };
 
   const allSelected = results.length > 0 && selectedIds.size === results.length;
-  const someSelected = selectedIds.size > 0 && selectedIds.size < results.length;
+  const someSelected =
+    selectedIds.size > 0 && selectedIds.size < results.length;
+
+  // 初回検索時のローディング表示
+  if (!data && isValidating) {
+    return (
+      <Card>
+        <CardContent className="py-8">
+          <div className="text-center">
+            <Loader2 className="animate-spin h-8 w-8 mx-auto mb-4 text-muted-foreground" />
+            <p className="text-muted-foreground">検索中...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // データが存在しない場合は何も表示しない
+  if (!data || results.length === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-4">
       {/* Header with controls */}
-      <Card>
+      <Card className="sticky top-0">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
-              検索結果 ({results.length}件{totalResults && totalResults > results.length ? ` / 全${totalResults}件` : ''})
+              検索結果 ({results.length}件
+              {actualTotalCount > results.length
+                ? ` / 全${actualTotalCount.toLocaleString()}件`
+                : ""}
+              )
             </CardTitle>
             <div className="flex items-center gap-4">
               <div className="flex items-center space-x-2">
@@ -135,15 +160,15 @@ export function SearchResults({
                     </div>
                   )}
                 </div>
-                <label 
-                  htmlFor="select-all" 
+                <label
+                  htmlFor="select-all"
                   className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                 >
                   すべて選択
                 </label>
               </div>
-              <Button 
-                onClick={handleExport} 
+              <Button
+                onClick={handleExport}
                 disabled={selectedIds.size === 0}
                 className="flex items-center gap-2"
               >
@@ -151,6 +176,11 @@ export function SearchResults({
                 エクスポート ({selectedIds.size})
               </Button>
             </div>
+          </div>
+
+          {/* Query Usage Content */}
+          <div className="mt-4 pt-4 border-t border-border">
+            <QueryUsageContent />
           </div>
         </CardHeader>
       </Card>
@@ -164,7 +194,7 @@ export function SearchResults({
                 <Checkbox
                   id={`result-${result.id}`}
                   checked={selectedIds.has(result.id)}
-                  onCheckedChange={(checked) => 
+                  onCheckedChange={(checked) =>
                     handleSelectResult(result.id, checked as boolean)
                   }
                   className="mt-1"
@@ -176,7 +206,7 @@ export function SearchResults({
                       {result.snippet}
                     </p>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {result.company && (
                       <div className="flex items-center gap-2 text-sm">
@@ -185,14 +215,14 @@ export function SearchResults({
                         <span>{result.company}</span>
                       </div>
                     )}
-                    
+
                     {result.position && (
                       <div className="flex items-center gap-2 text-sm">
                         <span className="font-medium">役職:</span>
                         <span>{result.position}</span>
                       </div>
                     )}
-                    
+
                     {result.address && (
                       <div className="flex items-center gap-2 text-sm">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -200,7 +230,7 @@ export function SearchResults({
                         <span>{result.address}</span>
                       </div>
                     )}
-                    
+
                     {result.phone && (
                       <div className="flex items-center gap-2 text-sm">
                         <Phone className="h-4 w-4 text-muted-foreground" />
@@ -208,7 +238,7 @@ export function SearchResults({
                         <span>{result.phone}</span>
                       </div>
                     )}
-                    
+
                     {result.email && (
                       <div className="flex items-center gap-2 text-sm">
                         <Mail className="h-4 w-4 text-muted-foreground" />
@@ -216,23 +246,27 @@ export function SearchResults({
                         <span>{result.email}</span>
                       </div>
                     )}
-                    
+
                     {result.website && (
                       <div className="flex items-center gap-2 text-sm md:col-span-2">
                         <Globe className="h-4 w-4 text-muted-foreground" />
                         <span className="font-medium">Website:</span>
-                        <a 
-                          href={result.website} 
-                          target="_blank" 
+                        <a
+                          href={result.website}
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="text-primary hover:underline truncate"
                         >
-                          {result.title ? `${result.title} (${new URL(result.website).hostname})` : result.website}
+                          {result.title
+                            ? `${result.title} (${
+                                new URL(result.website).hostname
+                              })`
+                            : result.website}
                         </a>
                       </div>
                     )}
                   </div>
-                  
+
                   <div className="text-xs text-muted-foreground">
                     出典: {result.source}
                   </div>
@@ -241,29 +275,37 @@ export function SearchResults({
             </CardContent>
           </Card>
         ))}
-
-        {/* 無限スクロール用の監視要素 */}
-        <div ref={loadMoreRef} className="py-4">
-          {hasMore && isLoadingMore && (
-            <div className="flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>読み込み中...</span>
-            </div>
-          )}
-          {hasMore && !isLoadingMore && (
-            <div className="text-center text-muted-foreground text-sm">
-              スクロールして続きを読み込み
-            </div>
-          )}
-        </div>
-
-        {/* 全件表示完了メッセージ */}
-        {!hasMore && totalResults && results.length >= totalResults && (
-          <div className="text-center py-4 text-muted-foreground text-sm">
-            すべての結果を表示しました ({totalResults}件)
-          </div>
-        )}
       </div>
+
+      {/* Loading indicator */}
+      {isValidating && (
+        <Loader2
+          size={40}
+          className="animate-spin text-muted-foreground my-10 mx-auto"
+        />
+      )}
+
+      {/* Infinite scroll trigger */}
+      {!isValidating && !isLast && (
+        <InView
+          onChange={(inView) => {
+            if (inView) {
+              console.log("Loading page", size);
+              // スクロールでローディングが起動したらカウント
+              incrementUsage();
+              setSize(size + 1);
+            }
+          }}
+        />
+      )}
+
+      {/* End message */}
+      {isLast && (
+        <p className="text-muted-foreground text-sm my-10 text-center">
+          すべての結果を表示しました ({results.length}件 / 全
+          {actualTotalCount.toLocaleString()}件)
+        </p>
+      )}
     </div>
   );
 }

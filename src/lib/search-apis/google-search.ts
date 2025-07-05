@@ -29,6 +29,30 @@ interface GoogleSearchResponse {
     totalResults: string;
     searchTime: number;
   };
+  queries?: {
+    request?: Array<{
+      title: string;
+      totalResults: string;
+      searchTerms: string;
+      count: number;
+      startIndex: number;
+      inputEncoding: string;
+      outputEncoding: string;
+      safe: string;
+      cx: string;
+    }>;
+    nextPage?: Array<{
+      title: string;
+      totalResults: string;
+      searchTerms: string;
+      count: number;
+      startIndex: number;
+      inputEncoding: string;
+      outputEncoding: string;
+      safe: string;
+      cx: string;
+    }>;
+  };
 }
 
 function extractInfoFromItem(
@@ -139,6 +163,7 @@ function extractInfoFromItem(
   return {
     id,
     name: searchName,
+    title: item.title,
     company: extractedCompany,
     position: extractedPosition,
     address: extractedAddress,
@@ -150,14 +175,47 @@ function extractInfoFromItem(
   };
 }
 
+// ローカルストレージでAPI使用量を更新
+function incrementApiCallsInLocalStorage() {
+  if (typeof window === "undefined") return;
+
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const stored = localStorage.getItem("search-query-usage");
+
+    let usage = {
+      date: today,
+      count: 0,
+      apiCalls: 0,
+    };
+
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed.date === today) {
+        usage = parsed;
+      }
+    }
+
+    usage.apiCalls += 1;
+    localStorage.setItem("search-query-usage", JSON.stringify(usage));
+  } catch (error) {
+    console.error("Failed to update API usage:", error);
+  }
+}
+
 async function performGoogleSearch(
   apiKey: string,
   searchEngineId: string,
   query: string,
-  name: string
-): Promise<SearchResult[]> {
+  name: string,
+  startIndex: number = 1
+): Promise<{
+  results: SearchResult[];
+  totalResults: number;
+  hasNextPage: boolean;
+}> {
   const encodedQuery = encodeURIComponent(query);
-  const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodedQuery}&num=10`;
+  const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodedQuery}&num=10&start=${startIndex}`;
 
   const response = await fetch(url);
 
@@ -169,14 +227,47 @@ async function performGoogleSearch(
 
   const data: GoogleSearchResponse = await response.json();
 
+  // API呼び出し回数をローカルストレージで更新
+  incrementApiCallsInLocalStorage();
+
   if (!data.items || data.items.length === 0) {
-    return [];
+    return {
+      results: [],
+      totalResults: 0,
+      hasNextPage: false,
+    };
   }
 
-  return data.items.map((item) => extractInfoFromItem(item, name));
+  const totalResults = parseInt(data.searchInformation.totalResults) || 0;
+  const hasNextPage =
+    !!data.queries?.nextPage && data.queries.nextPage.length > 0;
+
+  console.log("GoogleSearchResponse", {
+    itemsLength: data.items.length,
+    totalResults,
+    hasNextPage,
+    currentStartIndex: startIndex,
+  });
+
+  return {
+    results: data.items.map((item) => extractInfoFromItem(item, name)),
+    totalResults,
+    hasNextPage,
+  };
 }
 
-export async function searchWithGoogle(name: string): Promise<SearchResult[]> {
+export async function searchWithGoogle(
+  name: string,
+  prefecture?: string,
+  address?: string,
+  excludeKeywords?: string[],
+  page: number = 0
+): Promise<{
+  results: SearchResult[];
+  totalResults: number;
+  hasNextPage: boolean;
+  currentPage: number;
+}> {
   const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
   const searchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
 
@@ -186,33 +277,93 @@ export async function searchWithGoogle(name: string): Promise<SearchResult[]> {
     );
   }
 
-  // 複数の検索クエリを試行して結果を統合
-  const queries = [
-    `"${name}" 会社 勤務先`,
-    `"${name}" 株式会社`,
-    `"${name}" 代表取締役 OR 取締役 OR 社長 OR 部長`,
-    `${name} 会社 役職`,
-  ];
+  // ローカルストレージで制限チェック
+  if (typeof window !== "undefined") {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const stored = localStorage.getItem("search-query-usage");
+
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.date === today && parsed.apiCalls >= 100) {
+          console.warn("[Google Search] Daily API limit (100 calls) reached");
+          return {
+            results: [],
+            totalResults: 0,
+            hasNextPage: false,
+            currentPage: page,
+          };
+        }
+      }
+    } catch (error) {
+      console.error("Failed to check API usage:", error);
+    }
+  }
+
+  // 複数の検索クエリを試行して結果を統合（完全一致のみ）
+  let queries: string[] = [];
+
+  // 除外キーワードを含むクエリ文字列を作成
+  const excludeQuery =
+    excludeKeywords && excludeKeywords.length > 0
+      ? ` ${excludeKeywords.map((k) => `-"${k}"`).join(" ")}`
+      : "";
+
+  if (prefecture && address) {
+    queries = [`"${name}" "${prefecture}" "${address}"${excludeQuery}`];
+  } else if (prefecture) {
+    queries = [`"${name}" "${prefecture}"${excludeQuery}`];
+  } else if (address) {
+    queries = [`"${name}" "${address}"${excludeQuery}`];
+  } else {
+    queries = [`"${name}"${excludeQuery}`];
+  }
 
   const allResults: SearchResult[] = [];
+  let totalResults = 0;
+  let hasNextPage = false;
 
   try {
-    // 複数のクエリで検索（並行実行）
-    const searchPromises = queries.map((query) =>
-      performGoogleSearch(apiKey, searchEngineId, query, name).catch(
-        (error) => {
-          console.warn(`Google search failed for query "${query}":`, error);
-          return [];
+    // 複数のクエリで検索（単一ページのみ）
+    for (const query of queries) {
+      // ページネーション：10件ずつ取得
+      const startIndex = page * 10 + 1;
+
+      try {
+        const searchResponse = await performGoogleSearch(
+          apiKey,
+          searchEngineId,
+          query,
+          name,
+          startIndex
+        );
+
+        // API呼び出し回数はperformGoogleSearch内で更新される
+
+        if (searchResponse.results.length > 0) {
+          allResults.push(...searchResponse.results);
         }
-      )
-    );
 
-    const resultsArrays = await Promise.all(searchPromises);
+        // 最初のクエリから総結果数とページ情報を取得
+        if (totalResults === 0) {
+          totalResults = searchResponse.totalResults;
+          hasNextPage = searchResponse.hasNextPage;
+        }
 
-    // 結果を統合
-    for (const results of resultsArrays) {
-      allResults.push(...results);
+        // API制限を考慮して少し待機
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } catch (error) {
+        console.warn(
+          `Google search failed for query "${query}" at page ${page}:`,
+          error
+        );
+      }
     }
+
+    console.log(
+      `[Google Search] Searching for "${name}" with ${queries.length} queries:`,
+      queries
+    );
 
     // 重複を除去（URLが同じものを除外）
     const uniqueResults = allResults.filter(
@@ -220,7 +371,16 @@ export async function searchWithGoogle(name: string): Promise<SearchResult[]> {
         index === self.findIndex((r) => r.website === result.website)
     );
 
-    return uniqueResults.slice(0, 10); // 最大10件
+    console.log(
+      `[Google Search] Found ${allResults.length} total results, ${uniqueResults.length} unique results for "${name}"`
+    );
+
+    return {
+      results: uniqueResults,
+      totalResults,
+      hasNextPage,
+      currentPage: page,
+    };
   } catch (error) {
     console.error("Google Search API error:", error);
     throw new Error("Google検索中にエラーが発生しました");
