@@ -5,6 +5,37 @@ import { SearchActionResult } from '@/types/actions';
 import { parseAddress } from '@/lib/address-parser';
 import { SearchResult } from '@/types/search';
 
+export async function searchGoogle(query: string): Promise<SearchActionResult> {
+  try {
+    // 入力値の検証
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return {
+        success: false,
+        error: '検索キーワードが入力されていません'
+      };
+    }
+
+    console.log(`[Server Action] Google searching for: ${query.trim()}`);
+    const searchResponse = await searchPerson(query.trim());
+
+    return {
+      success: true,
+      data: searchResponse
+    };
+  } catch (error) {
+    console.error('[Server Action] Google search error:', error);
+    
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : '検索中に予期しないエラーが発生しました';
+
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
 export async function searchPersonAction(name: string, address?: string, excludeKeywords?: string[]): Promise<SearchActionResult> {
   try {
     // 入力値の検証
