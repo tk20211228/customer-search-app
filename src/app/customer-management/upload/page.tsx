@@ -139,15 +139,11 @@ export default function UploadPage() {
         }
       }
 
-      // 物件名を最初の行の物件名列から取得（列インデックス0）
-      const propertyName =
-        allRows[0]?.[0] || previewData.fileName.replace(/\.[^/.]+$/, "");
-
-      // 物件を作成
+      // 物件を作成（nameはファイル名を使用）
       const { data: property, error: propertyError } = await supabase
         .from("properties")
         .insert({
-          name: propertyName,
+          name: previewData.fileName,
           file_name: previewData.fileName,
           total_customers: allRows.length,
           completed_customers: 0,
