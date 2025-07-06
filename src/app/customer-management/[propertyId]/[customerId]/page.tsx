@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -178,7 +178,22 @@ export default function CustomerDetailPage() {
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-sm text-muted-foreground">住所</p>
-                  <p className="font-medium">{customer.owner_address || "-"}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{customer.owner_address || "-"}</p>
+                    {customer.owner_address && (
+                      <a
+                        href={`https://www.google.com/maps/place/${encodeURIComponent(
+                          customer.owner_address
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 transition-colors"
+                      >
+                        <MapPin className="h-4 w-4" />
+                        地図で見る
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
             </CardContent>
